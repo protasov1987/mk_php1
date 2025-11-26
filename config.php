@@ -15,6 +15,7 @@ $ALL_RESOURCES = [
     'menu_route_cards',
     'menu_route_cards_edit',
     'menu_route_cards_view',
+    'menu_tracker',
     'menu_users',
     'menu_access_levels',
 ];
@@ -81,6 +82,94 @@ function check_access(string $resource_code): bool
     return (bool)$row['allowed'];
 }
 
+function apply_operation_action(PDO $pdo, int $operationId, string $action, int $userId): void
+{
+    $allowedActions = ['start','pause','resume','finish','cancel'];
+    if (!in_array($action, $allowedActions, true)) {
+        return;
+    }
+
+    $stmtOp = $pdo->prepare('SELECT id, route_card_id FROM route_operations WHERE id=?');
+    $stmtOp->execute([$operationId]);
+    $operation = $stmtOp->fetch();
+    if (!$operation) {
+        return;
+    }
+
+    $statuses = [
+        'start' => 'in_progress',
+        'resume' => 'in_progress',
+        'pause' => 'paused',
+        'finish' => 'done',
+        'cancel' => 'cancelled',
+    ];
+    $newStatus = $statuses[$action] ?? 'waiting';
+
+    $pdo->prepare('UPDATE route_operations SET status=?, updated_at=NOW() WHERE id=?')->execute([$newStatus, $operationId]);
+    $pdo->prepare('INSERT INTO operation_logs (route_operation_id, user_id, action, timestamp) VALUES (?,?,?,NOW())')
+        ->execute([$operationId, $userId, $action]);
+
+    $cardUpdate = null;
+    if ($action === 'start' || $action === 'resume') {
+        $cardUpdate = 'in_progress';
+    } elseif ($action === 'pause') {
+        $cardUpdate = 'paused';
+    } elseif ($action === 'cancel') {
+        $cardUpdate = 'cancelled';
+    } elseif ($action === 'finish') {
+        $stmtRemaining = $pdo->prepare('SELECT COUNT(*) FROM route_operations WHERE route_card_id=? AND status NOT IN ("done")');
+        $stmtRemaining->execute([(int)$operation['route_card_id']]);
+        if ((int)$stmtRemaining->fetchColumn() === 0) {
+            $cardUpdate = 'done';
+        }
+    }
+
+    if ($cardUpdate) {
+        $pdo->prepare('UPDATE route_cards SET status=?, updated_at=NOW() WHERE id=?')
+            ->execute([$cardUpdate, (int)$operation['route_card_id']]);
+    }
+}
+
+function calculate_operation_duration(PDO $pdo, int $operationId, string $currentStatus): int
+{
+    $stmt = $pdo->prepare('SELECT action, timestamp FROM operation_logs WHERE route_operation_id=? ORDER BY timestamp ASC');
+    $stmt->execute([$operationId]);
+    $logs = $stmt->fetchAll();
+
+    $total = 0;
+    $rangeStart = null;
+    foreach ($logs as $log) {
+        if (in_array($log['action'], ['start', 'resume'], true)) {
+            $rangeStart = strtotime($log['timestamp']);
+        } elseif ($rangeStart && in_array($log['action'], ['pause', 'finish', 'cancel'], true)) {
+            $total += max(0, strtotime($log['timestamp']) - $rangeStart);
+            $rangeStart = null;
+        }
+    }
+
+    if ($rangeStart && $currentStatus === 'in_progress') {
+        $total += max(0, time() - $rangeStart);
+    }
+
+    return $total;
+}
+
+function format_duration(int $seconds): string
+{
+    $hours = intdiv($seconds, 3600);
+    $minutes = intdiv($seconds % 3600, 60);
+    $secs = $seconds % 60;
+    $parts = [];
+    if ($hours > 0) {
+        $parts[] = $hours . 'ч';
+    }
+    if ($minutes > 0 || $hours > 0) {
+        $parts[] = $minutes . 'м';
+    }
+    $parts[] = $secs . 'с';
+    return implode(' ', $parts);
+}
+
 function ensure_default_data(): void
 {
     $pdo = get_pdo();
@@ -126,9 +215,34 @@ function ensure_default_data(): void
     }
 }
 
+function ensure_permissions_completeness(): void
+{
+    $pdo = get_pdo();
+    global $ALL_RESOURCES;
+
+    $levels = $pdo->query('SELECT id FROM access_levels')->fetchAll();
+    foreach ($levels as $level) {
+        foreach ($ALL_RESOURCES as $res) {
+            $stmt = $pdo->prepare('SELECT COUNT(*) FROM access_level_permissions WHERE access_level_id=? AND resource_code=?');
+            $stmt->execute([$level['id'], $res]);
+            if ((int)$stmt->fetchColumn() === 0) {
+                $defaultAllowed = 0;
+                if ($res === 'menu_tracker') {
+                    $inherit = $pdo->prepare('SELECT allowed FROM access_level_permissions WHERE access_level_id=? AND resource_code="menu_route_cards"');
+                    $inherit->execute([$level['id']]);
+                    $defaultAllowed = (int)$inherit->fetchColumn();
+                }
+                $pdo->prepare('INSERT INTO access_level_permissions (access_level_id, resource_code, allowed) VALUES (?,?,?)')
+                    ->execute([$level['id'], $res, $defaultAllowed]);
+            }
+        }
+    }
+}
+
 // Run default data check on include
 try {
     ensure_default_data();
+    ensure_permissions_completeness();
 } catch (Exception $e) {
     // If database is not ready, avoid breaking login page; message can be displayed later
 }

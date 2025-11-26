@@ -21,20 +21,8 @@ if (!$card) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && check_access('menu_route_cards_edit')) {
     $operationId = (int)($_POST['operation_id'] ?? 0);
     $action = $_POST['action'] ?? '';
-    $allowedActions = ['start','pause','resume','finish','cancel'];
-    if ($operationId && in_array($action, $allowedActions, true)) {
-        $statuses = [
-            'start' => 'in_progress',
-            'resume' => 'in_progress',
-            'pause' => 'paused',
-            'finish' => 'done',
-            'cancel' => 'cancelled',
-        ];
-        $newStatus = $statuses[$action] ?? 'waiting';
-        $stmtOp = $pdo->prepare('UPDATE route_operations SET status=?, updated_at=NOW() WHERE id=?');
-        $stmtOp->execute([$newStatus, $operationId]);
-        $stmtLog = $pdo->prepare('INSERT INTO operation_logs (route_operation_id, user_id, action, timestamp) VALUES (?,?,?,NOW())');
-        $stmtLog->execute([$operationId, $_SESSION['user_id'], $action]);
+    if ($operationId) {
+        apply_operation_action($pdo, $operationId, $action, (int)$_SESSION['user_id']);
     }
     header('Location: route_card_view.php?id=' . $cardId);
     exit;
@@ -87,17 +75,20 @@ $operations = $stmtOps->fetchAll();
                 <th>Подразделение</th>
                 <th>План, мин</th>
                 <th>Статус</th>
+                <th>Факт</th>
                 <?php if (check_access('menu_route_cards_edit')): ?><th class="no-print">Действия</th><?php endif; ?>
             </tr>
         </thead>
         <tbody>
             <?php foreach ($operations as $op): ?>
+                <?php $elapsed = calculate_operation_duration($pdo, (int)$op['id'], $op['status']); ?>
                 <tr>
                     <td><?php echo (int)$op['operation_number']; ?></td>
                     <td><?php echo h($op['name']); ?></td>
                     <td><?php echo h($op['subdivision']); ?></td>
                     <td><?php echo (int)$op['planned_time_min']; ?></td>
                     <td><?php echo h($op['status']); ?></td>
+                    <td><?php echo format_duration($elapsed); ?></td>
                     <?php if (check_access('menu_route_cards_edit')): ?>
                     <td class="no-print">
                         <form method="post" class="d-flex gap-1 flex-wrap">

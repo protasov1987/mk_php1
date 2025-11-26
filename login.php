@@ -47,26 +47,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Авторизация</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            min-height: 100vh;
+            background: linear-gradient(135deg, #1b365d 0%, #2f4b86 40%, #f4f7fb 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .auth-card {
+            backdrop-filter: blur(10px);
+            background: rgba(255,255,255,0.9);
+            border: 1px solid rgba(255,255,255,0.7);
+        }
+    </style>
 </head>
-<body class="bg-light d-flex align-items-center" style="height:100vh;">
-<div class="container">
-    <div class="row justify-content-center">
-        <div class="col-md-4">
-            <div class="card shadow-sm">
-                <div class="card-header text-center"><strong>Авторизация</strong></div>
-                <div class="card-body">
-                    <?php if ($error): ?>
-                        <div class="alert alert-danger"><?php echo h($error); ?></div>
-                    <?php endif; ?>
-                    <form method="post">
-                        <div class="mb-3">
-                            <label for="password" class="form-label">Пароль</label>
-                            <input type="password" class="form-control" id="password" name="password" required autofocus>
-                        </div>
-                        <button type="submit" class="btn btn-primary w-100">Войти</button>
-                    </form>
+<body>
+<div class="container" style="max-width: 420px;">
+    <div class="card shadow-lg auth-card">
+        <div class="card-header text-center bg-transparent border-0 pt-4 pb-0">
+            <h4 class="mb-1">Добро пожаловать</h4>
+            <p class="text-muted mb-0">Введите пароль, чтобы продолжить</p>
+        </div>
+        <div class="card-body p-4">
+            <?php if ($error): ?>
+                <div class="alert alert-danger"><?php echo h($error); ?></div>
+            <?php endif; ?>
+            <form method="post">
+                <div class="mb-3">
+                    <label for="password" class="form-label">Пароль</label>
+                    <input type="password" class="form-control" id="password" name="password" required autofocus>
                 </div>
-            </div>
+                <button type="submit" class="btn btn-primary w-100">Войти</button>
+            </form>
         </div>
     </div>
 </div>
